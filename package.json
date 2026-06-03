@@ -1,0 +1,10 @@
+{
+  "name": "app-mind",
+  "version": "1.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Dev/test harness only — Mobius installs index.jsx as a single compiled module.",
+  "scripts": {
+    "test": "NODE_PATH=/home/hmzmrzx/projects/mobius/frontend/node_modules node --test tests/"
+  }
+}

@@ -90,6 +90,29 @@ export function shouldShowNodeLabel(globalScale, node = {}, hoverId = null) {
     || (scale >= 0.4 && (hasMocList || isHover));
 }
 
+export function safeMemoryPath(path) {
+  if (typeof path !== 'string') return null;
+  const trimmed = path.trim();
+  if (!trimmed || trimmed.startsWith('/') || trimmed.includes('\\')) return null;
+  if (trimmed.includes('?') || trimmed.includes('#')) return null;
+  const parts = trimmed.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) return null;
+  if (!parts[parts.length - 1].endsWith('.md')) return null;
+  return parts.map((part) => encodeURIComponent(part)).join('/');
+}
+
+export const MEMORY_SANITIZE_OPTIONS = {
+  USE_PROFILES: { html: true },
+  FORBID_TAGS: ['img', 'picture', 'source', 'video', 'audio', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+  FORBID_ATTR: ['href', 'src', 'srcset', 'xlink:href', 'formaction'],
+};
+
+export function neutralizeMemoryMarkdown(md) {
+  return (md || '')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt) => ` ${alt || 'image'} `)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+}
+
 // A short, human relative-time from an ISO-ish frontmatter date string.
 function relDate(s) {
   if (!s || s === 'null') return null;
@@ -301,8 +324,12 @@ export default function App({ appId, token }) {
   useEffect(() => {
     if (!selected) return;
     let alive = true;
-    const path = selected.path || ('notes/' + selected.id + '.md');
+    const path = safeMemoryPath(selected.path || ('notes/' + selected.id + '.md'));
     setNoteState({ status: 'loading', md: '', fm: {} });
+    if (!path) {
+      setNoteState({ status: 'error', md: 'Invalid memory note path.', fm: {} });
+      return () => { alive = false; };
+    }
     (async () => {
       try {
         const res = await fetch(NOTE_BASE + path, { headers: authHeaders });
@@ -350,8 +377,8 @@ export default function App({ appId, token }) {
     // a regex net is routinely bypassed.
     if (marked && purify) {
       try {
-        const raw = marked(noteState.md, { breaks: true, gfm: true });
-        return purify.sanitize(raw, { USE_PROFILES: { html: true } });
+        const raw = marked(neutralizeMemoryMarkdown(noteState.md), { breaks: true, gfm: true });
+        return purify.sanitize(raw, MEMORY_SANITIZE_OPTIONS);
       } catch { return escapeHtml(noteState.md); }
     }
     return null; // renderer not ready yet -> fall back to plain text below
