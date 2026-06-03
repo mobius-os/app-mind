@@ -1,0 +1,27 @@
+{
+  "id": "mind",
+  "name": "Mind",
+  "version": "1.0.0",
+  "description": "What Möbius knows about you — an Obsidian-style graph of the agent's memory. Nodes are the notes and maps-of-content it grows and links as you use it; tap any node to read the markdown behind it. The graph fills in over time as Möbius learns.",
+  "author": "mobius-os",
+  "license": "MIT",
+  "homepage": "https://github.com/mobius-os/app-mind",
+  "entry": "index.jsx",
+  "icon": "icon.png",
+  "offline_capable": false,
+  "permissions": {
+    "cross_app_access": "none",
+    "share_with_apps": "none"
+  },
+  "runtime": {
+    "imports": [
+      "react",
+      "react-dom"
+    ],
+    "esm_deps": [
+      "react-force-graph-2d",
+      "marked",
+      "dompurify"
+    ]
+  }
+}
