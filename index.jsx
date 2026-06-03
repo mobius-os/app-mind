@@ -656,12 +656,19 @@ export default function App({ appId, token }) {
                 linkDirectionalParticleWidth={(link) => (link.kind === 'moc' ? 1.35 : 0.9)}
                 linkDirectionalParticleColor={(link) => linkColor(link)}
                 autoPauseRedraw={false}
-                cooldownTicks={260}
-                cooldownTime={30000}
+                // Obsidian-like motion: the nodes drift and ease to rest over
+                // a longer, gentler settle (lower alpha decay = slower energy
+                // bleed), and the flowing link particles + reheat-on-drag keep
+                // the graph feeling alive after it settles. (react-force-graph
+                // has no public alphaTarget, so true never-ending node drift
+                // isn't exposed; this is the gentle-settle approximation.)
+                cooldownTicks={Infinity}
+                cooldownTime={45000}
+                d3AlphaDecay={0.0145}
                 onNodeClick={(n) => { setSelected(n); setHoverId(null); }}
                 onNodeHover={(n) => setHoverId(n ? n.id : null)}
                 onBackgroundClick={() => setSelected(null)}
-                d3VelocityDecay={0.24}
+                d3VelocityDecay={0.26}
                 warmupTicks={28}
               />
             ) : (
