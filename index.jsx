@@ -911,7 +911,7 @@ export default function App({ appId, token }) {
               </div>
             )}
 
-            <div style={S.graphHint} className="mg-graph-hint">Drag to pan · scroll to zoom · tap a node to read it</div>
+            <div style={S.graphHint} className="mg-graph-hint">Drag to pan · pinch or scroll to zoom · tap a node to read it</div>
 
             <div style={S.graphTools} className="mg-graph-tools">
               <div style={S.focusSwitch}>
@@ -961,7 +961,7 @@ export default function App({ appId, token }) {
             </div>
 
             {legendItems.length > 0 && (
-              <div style={S.legend} className="mg-scroll">
+              <div style={S.legend} className="mg-scroll mg-legend">
                 <div style={S.legendTitle}>Maps of Content</div>
                 <div style={S.legendRow}>
                   <span style={{ ...S.legendSwatch, background: cssVar('--accent', '#a78bfa') }} />
@@ -1093,7 +1093,7 @@ export default function App({ appId, token }) {
               )}
             </div>
 
-            <div style={S.panelFoot}>
+            <div style={S.panelFoot} className="mg-panel-foot">
               <button style={S.discussBtn} className="mg-discuss" onClick={() => discuss(selected)}>
                 <ChatGlyph />
                 Discuss in a new chat
@@ -1305,9 +1305,11 @@ const S = {
     border: '1px solid var(--border)', gap: 2,
   },
   toggleBtn: {
-    display: 'flex', alignItems: 'center', border: 'none', background: 'transparent',
-    color: 'var(--muted)', fontSize: 12.5, fontWeight: 600, padding: '5px 11px',
-    borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font)', transition: 'color 0.15s, background 0.15s',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+    border: 'none', background: 'transparent',
+    color: 'var(--muted)', fontSize: 12.5, fontWeight: 600, padding: '8px 13px',
+    minHeight: 44, borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font)',
+    transition: 'color 0.15s, background 0.15s',
   },
   toggleActive: {
     background: 'var(--bg)', color: 'var(--text)',
@@ -1374,8 +1376,9 @@ const S = {
     background: 'var(--surface2)', borderRadius: 9, border: '1px solid var(--border)',
   },
   focusBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
     border: 'none', background: 'transparent', color: 'var(--muted)', borderRadius: 6,
-    padding: '5px 8px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+    padding: '8px 8px', minHeight: 44, fontSize: 12, fontWeight: 700, cursor: 'pointer',
     fontFamily: 'var(--font)', transition: 'color 0.15s, background 0.15s, opacity 0.15s',
   },
   focusActive: {
@@ -1409,7 +1412,8 @@ const S = {
     color: 'var(--muted)', marginBottom: 8,
   },
   legendRow: {
-    display: 'flex', alignItems: 'center', gap: 9, padding: '3px 4px', width: '100%',
+    display: 'flex', alignItems: 'center', gap: 9, padding: '7px 6px', minHeight: 44,
+    width: '100%',
     background: 'transparent', border: 'none', borderRadius: 6, cursor: 'pointer',
     textAlign: 'left', fontFamily: 'var(--font)', color: 'var(--text)',
   },
@@ -1491,7 +1495,8 @@ const S = {
   panelTitle: { fontSize: 19, fontWeight: 700, lineHeight: 1.22, letterSpacing: '-0.015em' },
   closeBtn: {
     border: 'none', background: 'var(--surface2)', color: 'var(--muted)',
-    width: 30, height: 30, borderRadius: 8, fontSize: 20, lineHeight: 1, cursor: 'pointer',
+    width: 40, height: 40, minWidth: 44, minHeight: 44, borderRadius: 10, fontSize: 20,
+    lineHeight: 1, cursor: 'pointer',
     flexShrink: 0, fontFamily: 'var(--font)', display: 'flex', alignItems: 'center',
     justifyContent: 'center', transition: 'background 0.15s, color 0.15s',
   },
@@ -1532,6 +1537,13 @@ const S = {
 };
 
 const CSS = `
+/* mobius-ui:Focus v1 -- shared keyboard focus ring (WCAG 2.4.7); never bare outline:none */
+:where(button,a,input,textarea,select,summary,[role="button"],[tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* /mobius-ui:Focus */
+
 /* mobius-ui:NativeTouch v1 — keep in sync; library candidate. Diverge below the marker only. */
 * { -webkit-tap-highlight-color: transparent; }
 .mg-tgl, .mg-legend-row, .mg-close, .mg-discuss, .mg-row, .mg-th { touch-action: manipulation; }
@@ -1620,13 +1632,19 @@ const CSS = `
   animation: mg-skel-pulse 1.4s ease-in-out infinite;
 }
 @media (max-width: 640px) {
-  .mg-graph-hint { display: none; }
   .mg-graph-tools { top: 8px !important; right: 8px !important; left: 8px !important; width: auto !important; }
+  /* Keep the discovery hint for touch users (who most benefit from learning
+     pinch-zoom / tap-to-open), but move it clear of the full-width top tools.
+     The legend lifts above it so the two bottom affordances never overlap. */
+  .mg-graph-hint { top: auto !important; bottom: max(12px, env(safe-area-inset-bottom)) !important; }
+  .mg-legend { bottom: calc(40px + max(12px, env(safe-area-inset-bottom))) !important; }
   .mg-panel {
     inset: auto 0 0 0; width: 100%; height: 82%; border-left: none;
     border-top: 1px solid var(--border); border-radius: 18px 18px 0 0;
     animation: mg-sheet-in 0.26s cubic-bezier(0.22,1,0.36,1);
   }
+  /* Bottom-sheet footer sits above the iOS home indicator / gesture bar. */
+  .mg-panel-foot { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
 }
 /* /mobius-ui:Sheet */
 
