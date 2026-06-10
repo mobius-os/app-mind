@@ -251,33 +251,55 @@ export default function App({ appId, token }) {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
-  // --- Load the graph index. ---
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setStatus('loading');
-      try {
-        const res = await fetch(GRAPH_URL, { headers: authHeaders });
-        if (res.status === 404) {
-          if (alive) { setGraph({ nodes: [], edges: [], problems: [] }); setStatus('empty'); }
-          return;
-        }
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        const nodes = Array.isArray(data.nodes) ? data.nodes : [];
-        if (!alive) return;
-        setGraph({
-          nodes,
-          edges: Array.isArray(data.edges) ? data.edges : [],
-          problems: Array.isArray(data.problems) ? data.problems : [],
-        });
-        setStatus(nodes.length === 0 ? 'empty' : 'ready');
-      } catch (e) {
-        if (alive) { setErrMsg(String(e.message || e)); setStatus('error'); }
+  // --- Load the graph index. Reusable so we can re-fetch on return (the graph
+  //     is rebuilt by the nightly Dreaming run while the app is closed, so a
+  //     once-on-mount load would show yesterday's graph forever). `quiet` skips
+  //     the loading state for a background refresh so the visible graph doesn't
+  //     flash a spinner when nothing has changed. ---
+  const loadGraph = useCallback(async (quiet = false) => {
+    if (!quiet) setStatus('loading');
+    try {
+      const res = await fetch(GRAPH_URL, { headers: authHeaders, cache: 'no-store' });
+      if (res.status === 404) {
+        setGraph({ nodes: [], edges: [], problems: [] });
+        setStatus('empty');
+        return;
       }
-    })();
-    return () => { alive = false; };
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+      const problems = Array.isArray(data.problems) ? data.problems : [];
+      setGraph({ nodes, edges: Array.isArray(data.edges) ? data.edges : [], problems });
+      // No nodes + error-severity problems is a BROKEN build, not a fresh empty
+      // memory — don't reassure the user with the "getting to know you" state.
+      const hasErrors = problems.some((p) => p.severity === 'error');
+      setStatus(nodes.length === 0 ? (hasErrors ? 'broken' : 'empty') : 'ready');
+    } catch (e) {
+      // A failed background refresh must not blow away an already-good graph.
+      if (!quiet) { setErrMsg(String(e.message || e)); setStatus('error'); }
+    }
   }, [authHeaders]);
+
+  useEffect(() => { loadGraph(false); }, [loadGraph]);
+
+  // Re-fetch the graph when the user returns to the app (tab visible / window
+  // focused). The nightly rebuild happens while Mind is closed; this is what
+  // picks up the new graph without a manual reload. Guarded by hasLoadedRef so
+  // the very first visibility/focus event doesn't double-fetch the mount load.
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.hidden) return;
+      if (!hasLoadedRef.current) { hasLoadedRef.current = true; return; }
+      loadGraph(true);
+    };
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('focus', onReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', onReturn);
+      window.removeEventListener('focus', onReturn);
+    };
+  }, [loadGraph]);
 
   // --- Measure the canvas container in CSS pixels (force-graph handles dpr). ---
   useEffect(() => {
@@ -300,10 +322,15 @@ export default function App({ appId, token }) {
       if (n.type === 'moc') mocSlugs.add(n.id);
       if (Array.isArray(n.mocs)) for (const m of n.mocs) mocSlugs.add(m);
     }
-    // Sort for determinism so colors don't reshuffle between loads.
+    // Sort for determinism so colors don't reshuffle between loads, then assign
+    // by sequential index — NOT hashStr(slug) % len, which collides freely (two
+    // distinct slugs routinely hash to the same palette index, so two hubs got
+    // indistinguishable colors even with far fewer hubs than palette entries).
+    // Sequential assignment gives the first PALETTE.length hubs all-distinct
+    // colors; only genuine overflow past the palette wraps (and reuses) a color.
     const sorted = [...mocSlugs].sort();
     sorted.forEach((slug, i) => {
-      map[slug] = PALETTE[hashStr(slug) % PALETTE.length] || PALETTE[i % PALETTE.length];
+      map[slug] = PALETTE[i % PALETTE.length];
     });
     return map;
   }, [graph]);
@@ -331,12 +358,15 @@ export default function App({ appId, token }) {
     }
   }, [graph, focusNodeId]);
 
+  // In All mode the visible set is just the whole graph and must NOT depend on
+  // focusNodeId — selecting a node (which sets focusNodeId) would otherwise
+  // recompute this memo, churn a new object down to fgData, and reheat the
+  // whole layout. Only the local-focus path actually reads focusNodeId/depth.
   const visibleGraph = useMemo(() => {
     if (!graph) return null;
-    return localFocus
-      ? deriveLocalGraph(graph, focusNodeId, focusDepth)
-      : { nodes: graph.nodes, edges: graph.edges };
-  }, [graph, localFocus, focusNodeId, focusDepth]);
+    if (!localFocus) return { nodes: graph.nodes, edges: graph.edges };
+    return deriveLocalGraph(graph, focusNodeId, focusDepth);
+  }, [graph, localFocus, localFocus ? focusNodeId : null, localFocus ? focusDepth : null]);
 
   // --- Neighbor sets for hover dimming. ---
   const neighbors = useMemo(() => {
@@ -354,19 +384,49 @@ export default function App({ appId, token }) {
     return map;
   }, [visibleGraph]);
 
-  // --- react-force-graph mutates node objects (x/y/vx/vy) in place, so it
-  //     needs its own object references. Build once per graph. ---
+  // --- react-force-graph mutates node objects (x/y/vx/vy/fx/fy) in place and
+  //     restarts its simulation whenever it sees a node object it hasn't laid
+  //     out yet. If we minted fresh {...n} objects on every visibleGraph
+  //     recompute, every node tap, depth step, or Local<->All switch would
+  //     scatter the graph from scratch. Instead we keep a persistent
+  //     id->liveNode cache for the whole graph's lifetime: a node reuses the
+  //     SAME object across recomputes (preserving its settled position), with
+  //     its static fields patched in case the graph data changed underneath it.
+  //     The cache is pruned only against the FULL graph (not the visible
+  //     subset) so toggling Local focus doesn't forget hidden nodes' positions.
+  //     Only genuinely new nodes (e.g. after a nightly rebuild) get laid out. ---
+  const nodeCacheRef = useRef(new Map());
   const fgData = useMemo(() => {
     if (!visibleGraph) return { nodes: [], links: [] };
+    const cache = nodeCacheRef.current;
+    const nodes = visibleGraph.nodes.map((n) => {
+      const live = cache.get(n.id);
+      if (live) {
+        // Patch static fields in place; keep x/y/vx/vy/fx/fy from the sim.
+        Object.assign(live, n);
+        return live;
+      }
+      const fresh = { ...n };
+      cache.set(n.id, fresh);
+      return fresh;
+    });
+    // Prune cache entries for nodes the (full) graph no longer has, so it can't
+    // grow unbounded across nightly rebuilds.
+    if (graph) {
+      const liveIds = new Set(graph.nodes.map((n) => n.id));
+      for (const id of cache.keys()) {
+        if (!liveIds.has(id)) cache.delete(id);
+      }
+    }
     return {
-      nodes: visibleGraph.nodes.map((n) => ({ ...n })),
+      nodes,
       links: visibleGraph.edges.map((e) => ({
         source: typeof e.source === 'object' ? e.source.id : e.source,
         target: typeof e.target === 'object' ? e.target.id : e.target,
         kind: e.kind,
       })),
     };
-  }, [visibleGraph]);
+  }, [visibleGraph, graph]);
 
   // --- Smooth hover focus: a 0..1 value per node that eases toward 1 for the
   //     hovered node + its neighbors and toward 0 for everything else, so the
@@ -793,6 +853,17 @@ export default function App({ appId, token }) {
           </div>
         )}
 
+        {status === 'broken' && (
+          <div style={S.center}>
+            <div style={S.errIcon}>!</div>
+            <div style={S.centerTitle}>The memory graph couldn't be built</div>
+            <div style={S.centerText}>
+              There's memory on disk, but {errCount === 1 ? 'an error' : `${errCount} errors`} stopped
+              the graph from rebuilding. Open the health report above for details.
+            </div>
+          </div>
+        )}
+
         {status === 'ready' && view === 'graph' && (
           <div ref={wrapRef} style={S.graphWrap} className="mg-graph">
             {FG && dims.w > 0 ? (
@@ -896,7 +967,9 @@ export default function App({ appId, token }) {
                   <span style={{ ...S.legendSwatch, background: cssVar('--accent', '#a78bfa') }} />
                   <span style={S.legendLabel}>Hub (MOC)</span>
                 </div>
-                {legendItems.slice(0, 12).map((it) => (
+                {/* Render every hub — the container scrolls (maxHeight + mg-scroll),
+                    so we never silently drop hubs past an arbitrary cap. */}
+                {legendItems.map((it) => (
                   <button
                     key={it.slug}
                     style={S.legendRow}
