@@ -619,7 +619,7 @@ export default function App({ appId, token }) {
         {status === 'empty' && (
           <div style={S.center}>
             <EmptyConstellation />
-            <div style={S.centerTitle}>Mind is just getting to know you</div>
+            <div style={S.centerTitle}>Memory is just getting to know you</div>
             <div style={S.centerText}>
               It fills in as you use Möbius — every chat, app, and habit leaves a
               trace here. Come back once you've given it something to remember.
@@ -957,7 +957,7 @@ function MindGraphRenderer({
       ref={hostRef}
       style={S.pixiGraph}
       className="mg-pixi-graph"
-      aria-label={mode === 'local' ? 'Local note graph' : 'Mind graph'}
+      aria-label={mode === 'local' ? 'Local note graph' : 'Memory graph'}
     />
   );
 }
